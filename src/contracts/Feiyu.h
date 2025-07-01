@@ -9,8 +9,6 @@ static constexpr uint8 MIN_NAME_LENGTH = 1;
 
 static constexpr uint8 SUCCESS = 0;
 
-typedef HashMap<uint64, ResolveData, MAX_NUMBER_OF_SUBDOMAINS> SubdomainResolveHashMap;
-
 struct QNSLogger
 {
 	uint32 _contractIndex;
@@ -177,6 +175,8 @@ struct ResolveData {
 	}
 };
 
+typedef HashMap<uint64, ResolveData, MAX_NUMBER_OF_SUBDOMAINS> SubdomainResolveHashMap;
+
 struct FEIYU2
 {
 };
@@ -185,7 +185,7 @@ struct FEIYU : public ContractBase
 {
 public:
 	HashMap<uint64, RegistryRecord, MAX_NUMBER_OF_DOMAINS> registry;
-	HashMap<uint64, SubdomainResolveHashMap, MAX_NUMBER_OF_DOMAINS> resolveData;
+	HashMap<uint64, ResolveData, MAX_NUMBER_OF_DOMAINS> resolveData;
 	Array<uint64, MAX_NUMBER_OF_DOMAINS> domainHashedValues;
 
 	struct RegisterDomain_input {
@@ -236,7 +236,6 @@ public:
 	struct GetResolveData_locals {
 		RegistryRecord record;
 		ResolveData resolveData;
-		SubdomainResolveHashMap subdomainHashMap;
 	};
 
 	PUBLIC_FUNCTION_WITH_LOCALS(GetResolveData) {
@@ -245,12 +244,12 @@ public:
 			return;
 		}
 
-		if (!state.resolveData.get(input.domain.getRootHashedvalue(), locals.subdomainHashMap)) {
+	/*	if (!state.resolveData.get(input.domain.getRootHashedvalue(), locals.subdomainHashMap)) {
 			output.result = Error::NAME_HAS_NO_RESOLVE_DATA;
 			return;
-		}
+		}*/
 
-		if (!locals.subdomainHashMap.get(input.domain.getFullHashedValue(), locals.resolveData)) {
+		if (!state.resolveData.get(input.domain.getFullHashedValue(), locals.resolveData)) {
 			output.result = Error::NAME_HAS_NO_RESOLVE_DATA;
 			return;
 		}
@@ -294,7 +293,7 @@ public:
 
 	struct SetResolveData_locals {
 		RegistryRecord record;
-		SubdomainResolveHashMap subdomainHashMap;
+		//SubdomainResolveHashMap subdomainHashMap;
 	};
 
 	PUBLIC_PROCEDURE_WITH_LOCALS(SetResolveData) {
@@ -308,8 +307,8 @@ public:
 			output.result = Error::NOT_THE_OWNER;
 			return;
 		}
-		state.resolveData.get(input.domain.getRootHashedvalue(), locals.subdomainHashMap);
-		locals.subdomainHashMap.set(input.domain.getFullHashedValue(), input.data);
+		//state.resolveData.get(input.domain.getRootHashedvalue(), locals.subdomainHashMap);
+		state.resolveData.set(input.domain.getFullHashedValue(), input.data);
 		output.result = SUCCESS;
 	}
 	
@@ -317,7 +316,7 @@ public:
 		QNSLogger logger;
 		RegistryRecord record;
 		uint32 date;
-		SubdomainResolveHashMap subdomainHashMap;
+		//SubdomainResolveHashMap subdomainHashMap;
 	};
 
 	PUBLIC_PROCEDURE_WITH_LOCALS(RegisterDomain) {
@@ -341,7 +340,7 @@ public:
 		locals.logger = { FEIYU_CONTRACT_INDEX, SUCCESS, 0 };
 		LOG_INFO(locals.logger);
 		state.registry.set(input.domain.getRootHashedvalue(), { qpi.invocator(), qpi.epoch(), input.endEpoch, locals.date });
-		state.resolveData.set(input.domain.getRootHashedvalue(), locals.subdomainHashMap);
+		//state.resolveData.set(input.domain.getRootHashedvalue(), locals.subdomainHashMap);
 	}
 	
 	struct BEGIN_EPOCH_locals {
