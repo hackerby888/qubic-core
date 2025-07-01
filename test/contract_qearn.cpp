@@ -291,6 +291,7 @@ public:
     {
         QEARN::lock_input input;
         QEARN::lock_output output;
+
         EXPECT_EQ(invokeUserProcedure(QEARN_CONTRACT_INDEX, 1, input, output, user, amount), expectSuccess);
         return output.returnCode;
     }
