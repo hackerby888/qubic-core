@@ -10,10 +10,14 @@ static const id user(1, 2, 3, 4);
 static const id user2(1, 2, 3, 3);
 static const id FEIYU_CONTRACT_ID(FEIYU_CONTRACT_INDEX, 0, 0, 0);
 
-class UEFIString2 : public UEFIString {
+typedef HashMap<uint64, ResolveData, MAX_NUMBER_OF_SUBDOMAINS> SubdomainMap;
+
+template <uint64 LENGTH = MAX_NAME_LENGTH>
+class UEFIString2 : public UEFIString<LENGTH> {
 public:
-	static UEFIString fromCString(string cString) {
-		UEFIString output;
+	static UEFIString<LENGTH> fromCString(string cString) {
+		assert(cString.length() <= LENGTH);
+		UEFIString<LENGTH> output;
 		for (int i = 0; i < cString.length(); i++) {
 			output.set(i, cString.at(i));
 		}
@@ -21,7 +25,8 @@ public:
 		return output;
 	}
 
-	static string toCString(UEFIString output) {
+	static string toCString(UEFIString<LENGTH> output) {
+		assert(output.capacity() <= LENGTH);
 		string cString;
 		cString.resize(output.capacity());
 		uint8 uefiStringSize = 0;
@@ -45,8 +50,16 @@ public:
 
 class FeiyuChecker : FEIYU {
 public:
-	void checkState(sint16 toBe) {
-		
+	void removeDomainResolveData(Domain domain, bool isDeleteAll, SubdomainMap& gmap) {
+		if (isDeleteAll) {
+			resolveData.removeByKey(domain.getRootHashedvalue());
+		}
+		else {
+			SubdomainMap map;
+			resolveData.get(domain.getRootHashedvalue(), map);
+			map.removeByKey(domain.getFullHashedValue());
+			gmap = map;
+		}
 	}
 };
 
@@ -58,12 +71,16 @@ public:
 		INIT_CONTRACT(FEIYU);
 	}
 
-	void testSyscall() {
+	void removeDomainResolveData(Domain domain, bool isDeleteAll) {
 		increaseEnergy(user, 1);
-		callSystemProcedure(FEIYU_CONTRACT_INDEX, BEGIN_EPOCH);
-		getState()->checkState(20);
-
-
+		SubdomainMap map;
+		getState()->removeDomainResolveData(domain, isDeleteAll, map);
+		FEIYU::UpdateSubdomainMap_input input;
+		input.domain = domain;
+		input.subdomainHashMap = map;
+		FEIYU::UpdateSubdomainMap_output output;
+		invokeUserProcedure(FEIYU_CONTRACT_INDEX, 12, input, output, user, 0);
+		EXPECT_EQ(output.result, SUCCESS);
 	}
 
 	void testInsertDomain(Domain domain, sint8 expectedOutputCode = 0) {
@@ -71,7 +88,7 @@ public:
 
 		FEIYU::RegisterDomain_input input;
 		input.domain = domain;
-		input.endEpoch = EPOCHS_IN_YEAR * 2;
+		input.registrationYears = 1;
 		FEIYU::RegisterDomain_output output;
 		invokeUserProcedure(FEIYU_CONTRACT_INDEX, 8, input, output, user, 0);
 
@@ -97,7 +114,7 @@ public:
 		input.data = resolveData;
 		input.domain = domain;
 		FEIYU::SetResolveData_output output;
-		
+
 		invokeUserProcedure(FEIYU_CONTRACT_INDEX, 9, input, output, user, 0);
 		EXPECT_EQ(output.result, expectedOutputCode);
 	}
@@ -110,11 +127,12 @@ public:
 		callFunction(FEIYU_CONTRACT_INDEX, 10, input, output);
 		if (output.result == 0) {
 			EXPECT_EQ(output.record.owner, record.owner);
+			cout << output.record.registerEpoch << endl;
 		}
 	}
 
 	void testTransferToNewOwner(Domain domain, id newOwner) {
-		increaseEnergy(user, 1);	
+		increaseEnergy(user, 1);
 		FEIYU::TransferDomain_input input;
 		input.domain = domain;
 		input.newOwner = newOwner;
@@ -127,7 +145,7 @@ public:
 	{
 		return (FeiyuChecker*)contractStates[FEIYU_CONTRACT_INDEX];
 	}
-};		
+};
 
 //TEST(Aleo, TestSysCall) {
 //	string text("pro player");
@@ -174,10 +192,20 @@ public:
 //}
 
 TEST(Aleo, TestAddDomain) {
+	HashMap<uint64, uint64, 1> testMap;
+	testMap.set(1, 2);
+	testMap.set(2, 3);
+	testMap.isEmptySlot(0); // should return true
+	uint64 value;
+	testMap.get(1, value);
+	cout << "1" << value << endl;
+	testMap.get(2, value);
+	cout << "2" << value << endl;
+	cout << "total bytes contract" << sizeof(HashMap<uint64, RegistryRecord, MAX_NUMBER_OF_DOMAINS>) + (sizeof(HashMap<uint64, SubdomainMap, MAX_NUMBER_OF_DOMAINS>)) << endl;
 	FeiyuTest test;
-	Domain domain(UEFIString2::getEmpty(), UEFIString2::fromCString("example"), UEFIString2::fromCString("com"));
-	Domain domain2(UEFIString2::getEmpty(), UEFIString2::fromCString("example2"), UEFIString2::fromCString("com"));
-	Domain domain3(UEFIString2::getEmpty(), UEFIString2::fromCString("example"), UEFIString2::fromCString("org"));
+	Domain domain(UEFIString2<>::getEmpty(), UEFIString2<>::fromCString("example"), UEFIString2<MAX_TLD_LENGTH>::fromCString("com"));
+	Domain domain2(UEFIString2<>::getEmpty(), UEFIString2<>::fromCString("example2"), UEFIString2<MAX_TLD_LENGTH>::fromCString("com"));
+	Domain domain3(UEFIString2<>::getEmpty(), UEFIString2<>::fromCString("example"), UEFIString2<MAX_TLD_LENGTH>::fromCString("org"));
 
 	test.testInsertDomain(domain, SUCCESS);
 	test.testInsertDomain(domain, Error::NAME_ALREADY_REGISTERED);
@@ -189,22 +217,34 @@ TEST(Aleo, TestAddDomain) {
 	// example2.com is not registered, so it should return error
 	test.testSetResolveData(domain2, resolveData, Error::NAME_NOT_REGISTERED);
 	test.testSetResolveData(domain3, resolveData, Error::NAME_NOT_REGISTERED);
+	//test.removeDomainResolveData(domain, false);
 	test.testGetDomainResolveData(domain, resolveData, SUCCESS);
 	test.testGetDomainResolveData(domain2, resolveData, Error::NAME_NOT_REGISTERED);
-	domain.setSubDomain(UEFIString2::fromCString("ok"));
+
+	// should get error because example.com is not registered (delete)
+	test.removeDomainResolveData(domain, false);
+	test.testGetDomainResolveData(domain, resolveData, Error::NAME_HAS_NO_RESOLVE_DATA);
+
+	domain.setSubDomain(UEFIString2<>::fromCString("ok"));
 	// only example.com should have resolve data not ok.example.com, so this should return error
 	test.testGetDomainResolveData(domain, resolveData, Error::NAME_HAS_NO_RESOLVE_DATA);
 
 	RegistryRecord record;
 	record.owner = user;
 	test.testGetDomainRegistry(domain, record, SUCCESS);
-	domain.setSubDomain(UEFIString2::fromCString("ok"));
+	domain.setSubDomain(UEFIString2<>::fromCString("ok"));
 	test.testGetDomainRegistry(domain, record, SUCCESS);
 
 	// test transfer domain
 	test.testTransferToNewOwner(domain, user2);
 	record.owner = user2;
 	test.testGetDomainRegistry(domain, record, SUCCESS);
+	//SubdomainMap subMap;
+	//uint64 key = subMap.key(0);
+	//ResolveData data = subMap.value(0);
+	//ResolveData empty;
+	//EXPECT_EQ(empty, data);
+	//cout << "test key" << key << endl;
 
 	//uint32 res;
 	//QUOTTERY::packQuotteryDate(25, 6, 30, 0, 0, 0, res);

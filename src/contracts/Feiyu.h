@@ -1,13 +1,15 @@
 using namespace QPI;
 
-static constexpr uint64 MAX_NUMBER_OF_DOMAINS = 1024;
-static constexpr uint64 MAX_NUMBER_OF_SUBDOMAINS = 1024;
+static constexpr uint64 MAX_NUMBER_OF_DOMAINS = 1'048'576;
+static constexpr uint64 MAX_NUMBER_OF_SUBDOMAINS = 16;
 static constexpr uint8 EPOCHS_IN_YEAR = 52; 
-static constexpr uint8 MAX_NAME_LENGTH = 64;
+static constexpr uint8 MAX_NAME_LENGTH = 32;
 static constexpr uint8 MIN_NAME_LENGTH = 1;
-
-
+static constexpr uint64 MAX_TLD_LENGTH = 8;
 static constexpr uint8 SUCCESS = 0;
+
+static constexpr sint64 REGISTER_FEE_PER_YEAR = 2'000'000;
+static constexpr sint64 TRANSFER_DOMAIN_FEE = 100;
 
 struct QNSLogger
 {
@@ -18,15 +20,19 @@ struct QNSLogger
 
 enum Error {
 	NAME_INVALID = 1,
+	TLD_INVALID,
+	SUBDOMAIN_INVALID,
 	NAME_NOT_FOUND,
 	NAME_HAS_NO_RESOLVE_DATA,
 	NAME_NOT_REGISTERED,
 	NAME_ALREADY_REGISTERED,
 	DATE_INVALID,
-	NOT_THE_OWNER
+	NOT_THE_OWNER,
+	INVALID_FUND
 };
 
-struct UEFIString : public Array<sint8, MAX_NAME_LENGTH> {
+template <uint64 LENGTH = MAX_NAME_LENGTH>
+struct UEFIString : public Array<sint8, LENGTH> {
 public:
 	UEFIString() {
 		for (int i = 0; i < this->capacity(); i++) {
@@ -80,6 +86,9 @@ public:
 	}
 
 	bool operator==(const UEFIString& other) const {
+		if (this->capacity() != other.capacity()) {
+			return false;
+		}
 		for (int i = 0; i < this->capacity(); i++) {
 			if (this->get(i) != other.get(i)) {
 				return false;
@@ -90,15 +99,19 @@ public:
 };
 
 struct Domain {
-	UEFIString subDomain;
-	UEFIString rootDomain;
-	UEFIString tld;
+	UEFIString<> subDomain;
+	UEFIString<> rootDomain;
+	UEFIString<MAX_TLD_LENGTH> tld;
 
-	void setSubDomain(UEFIString subDomain) {
+	static HashFunction<UEFIString<>> hasher;
+	static HashFunction< UEFIString<MAX_TLD_LENGTH>> tldHasher;
+	static HashFunction<uint64> uint64Hasher;
+
+	void setSubDomain(UEFIString<> subDomain) {
 		this->subDomain = subDomain;
 	}
 
-	bool operator==(Domain &domain) {
+	bool operator==(Domain& domain) {
 		if (!(subDomain == domain.subDomain))
 			return false;
 		if (!(rootDomain == domain.rootDomain))
@@ -120,52 +133,48 @@ struct Domain {
 		return true;
 	}
 
+	// If domain is sub.example.com then will return the hash of sub.example.com
 	uint64 getFullHashedValue() const {
-		HashFunction<UEFIString> hasher;
-		HashFunction<uint64> uint64Hasher;
-		return uint64Hasher.hash(hasher.hash(subDomain) + hasher.hash(rootDomain) + hasher.hash(tld));
+		return uint64Hasher.hash(hasher.hash(subDomain) + hasher.hash(rootDomain) + tldHasher.hash(tld));
 	}
 
+	// If domain is sub.example.com then will return the hash of example.com
 	uint64 getRootHashedvalue() const {
-		HashFunction<UEFIString> hasher;
-		HashFunction<uint64> uint64Hasher;
-		return uint64Hasher.hash(hasher.hash(rootDomain) + hasher.hash(tld));
+		return uint64Hasher.hash(hasher.hash(rootDomain) + tldHasher.hash(tld));
 	}
 };
 
 struct RegistryRecord {
 	id owner;
 	uint16 registerEpoch;
-	uint16 endEpoch;
-	uint32 registerDate;
+	uint16 registrationYears;
 
 public:
 	RegistryRecord() {
 		owner = NULL_ID;
-		registerDate = 0;
+		registrationYears = 0;
 	}
 
-	RegistryRecord(id owner, uint16 registerEpoch, uint16 endEpoch, uint32 registerDate) {
+	RegistryRecord(id owner, uint16 registerEpoch, uint16 registrationYears) {
 		this->owner = owner;
 		this->registerEpoch = registerEpoch;
-		this->endEpoch = endEpoch;
-		this->registerDate = registerDate;
+		this->registrationYears = registrationYears;
 	}
 
 	bool operator==(const RegistryRecord& record) const {
-		return owner == record.owner && endEpoch == record.endEpoch && registerDate == record.registerDate;
+		return owner == record.owner && registrationYears == record.registrationYears;
 	}
 };
 
 struct ResolveData {
 	id address;
-	UEFIString text;
+	UEFIString<> text;
 
 	ResolveData() {
 		this->address = id::zero();
 	}
 
-	ResolveData(id address, UEFIString& text) {
+	ResolveData(const id& address, const UEFIString<>& text) {
 		this->address = address;
 		this->text = text;
 	}
@@ -175,81 +184,87 @@ struct ResolveData {
 	}
 };
 
-typedef HashMap<uint64, ResolveData, MAX_NUMBER_OF_SUBDOMAINS> SubdomainResolveHashMap;
-
 struct FEIYU2
 {
 };
-
 struct FEIYU : public ContractBase
 {
 public:
+	////// ******** States ******** //////
+	UEFIString<MAX_TLD_LENGTH> QUBIC_TLD;
+	UEFIString<MAX_TLD_LENGTH> QNS_TLD;
+	Array<UEFIString<MAX_TLD_LENGTH>, 2> TLDs;
 	HashMap<uint64, RegistryRecord, MAX_NUMBER_OF_DOMAINS> registry;
-	HashMap<uint64, ResolveData, MAX_NUMBER_OF_DOMAINS> resolveData;
-	Array<uint64, MAX_NUMBER_OF_DOMAINS> domainHashedValues;
+	HashMap<uint64, HashMap<uint64, ResolveData, MAX_NUMBER_OF_SUBDOMAINS>, MAX_NUMBER_OF_DOMAINS> resolveData;
 
-	struct RegisterDomain_input {
+	////// ******** Functions & Procedures ******** //////
+	struct UpdateSubdomainMap_input {
 		Domain domain;
-		uint16 endEpoch;
+		HashMap<uint64, ResolveData, MAX_NUMBER_OF_SUBDOMAINS> subdomainHashMap;
 	};
-
-	struct RegisterDomain_output {
+	struct UpdateSubdomainMap_output {
 		uint8 result;
 	};
+	PUBLIC_PROCEDURE(UpdateSubdomainMap) {
+		state.resolveData.set(input.domain.getRootHashedvalue(), input.subdomainHashMap);	
+		output.result = SUCCESS;
+	}
 
-	struct SetResolveData_input {
+	struct RenewDomain_input {
 		Domain domain;
-		ResolveData data;
+		uint16 yearsToRenew;
 	};
-
-	struct SetResolveData_output {
+	struct RenewDomain_output {
 		uint8 result;
 	};
-
-	struct GetDomainRegistry_input {
-		Domain domain;
-	};
-
-	struct GetDomainRegistry_output {
-		uint8 result;
+	struct RenewDomain_locals {
 		RegistryRecord record;
 	};
+	PUBLIC_PROCEDURE_WITH_LOCALS(RenewDomain) {
+		if (!state.registry.get(input.domain.getRootHashedvalue(), locals.record)) {
+			output.result = Error::NAME_NOT_REGISTERED;
+			return;
+		}
 
-	struct TransferDomain_input {
-		Domain domain;
-		id newOwner;
-	};
-	
-	struct TransferDomain_output {
-		uint8 result;
-	};
+		if (locals.record.owner != qpi.invocator()) {
+			output.result = Error::NOT_THE_OWNER;
+			return;
+		}
+
+		if (qpi.invocationReward() < input.yearsToRenew * REGISTER_FEE_PER_YEAR) {
+			output.result = Error::INVALID_FUND;
+			qpi.transfer(qpi.invocator(), qpi.invocationReward());
+			return;
+		}
+
+		locals.record.registrationYears += input.yearsToRenew;
+		state.registry.set(input.domain.getRootHashedvalue(), locals.record);
+	}
 
 	struct GetResolveData_input {
 		Domain domain;
 	};
-
 	struct GetResolveData_output {
 		uint8 result;
 		ResolveData data;
 	};
-
 	struct GetResolveData_locals {
 		RegistryRecord record;
 		ResolveData resolveData;
+		HashMap<uint64, ResolveData, MAX_NUMBER_OF_SUBDOMAINS> subdomainHashMap;
 	};
-
 	PUBLIC_FUNCTION_WITH_LOCALS(GetResolveData) {
 		if (!state.registry.get(input.domain.getRootHashedvalue(), locals.record)) {
 			output.result = Error::NAME_NOT_REGISTERED;
 			return;
 		}
 
-	/*	if (!state.resolveData.get(input.domain.getRootHashedvalue(), locals.subdomainHashMap)) {
+		if (!state.resolveData.get(input.domain.getRootHashedvalue(), locals.subdomainHashMap)) {
 			output.result = Error::NAME_HAS_NO_RESOLVE_DATA;
 			return;
-		}*/
+		}
 
-		if (!state.resolveData.get(input.domain.getFullHashedValue(), locals.resolveData)) {
+		if (!locals.subdomainHashMap.get(input.domain.getFullHashedValue(), locals.resolveData)) {
 			output.result = Error::NAME_HAS_NO_RESOLVE_DATA;
 			return;
 		}
@@ -258,11 +273,23 @@ public:
 		output.result = SUCCESS;
 	}
 
+	struct TransferDomain_input {
+		Domain domain;
+		id newOwner;
+	};
+	struct TransferDomain_output {
+		uint8 result;
+	};
 	struct TransferDomain_locals {
 		RegistryRecord record;
 	};
-
 	PUBLIC_PROCEDURE_WITH_LOCALS(TransferDomain) {
+		if (qpi.invocationReward() < TRANSFER_DOMAIN_FEE) {
+			output.result = Error::INVALID_FUND;
+			// Give back money for user
+			qpi.transfer(qpi.invocator(), qpi.invocationReward());
+			return;
+		}
 		if (!state.registry.get(input.domain.getRootHashedvalue(), locals.record)) {
 			output.result = Error::NAME_NOT_REGISTERED;
 			return;
@@ -276,26 +303,38 @@ public:
 		output.result = SUCCESS;
 	}
 
+	struct GetDomainRegistry_input {
+		Domain domain;
+	};
+	struct GetDomainRegistry_output {
+		uint8 result;
+		RegistryRecord record;
+	};
 	struct GetDomainRegistry_locals {
 		RegistryRecord record;
 		uint64 domainHashedvalue;
 	};
-
 	PUBLIC_FUNCTION_WITH_LOCALS(GetDomainRegistry) {
 		locals.domainHashedvalue = input.domain.getRootHashedvalue();
 		if (!state.registry.get(locals.domainHashedvalue, locals.record)) {
-			output.result = Error::NAME_NOT_REGISTERED; 
+			output.result = Error::NAME_NOT_REGISTERED;
 			return;
 		}
 		output.result = SUCCESS;
 		output.record = locals.record;
 	}
 
+	struct SetResolveData_input {
+		Domain domain;
+		ResolveData data;
+	};
+	struct SetResolveData_output {
+		uint8 result;
+	};
 	struct SetResolveData_locals {
 		RegistryRecord record;
-		//SubdomainResolveHashMap subdomainHashMap;
+		HashMap<uint64, ResolveData, MAX_NUMBER_OF_SUBDOMAINS> subdomainHashMap;
 	};
-
 	PUBLIC_PROCEDURE_WITH_LOCALS(SetResolveData) {
 		// Check if the domain exists in the registry
 		if (!state.registry.get(input.domain.getRootHashedvalue(), locals.record)) {
@@ -307,31 +346,56 @@ public:
 			output.result = Error::NOT_THE_OWNER;
 			return;
 		}
-		//state.resolveData.get(input.domain.getRootHashedvalue(), locals.subdomainHashMap);
-		state.resolveData.set(input.domain.getFullHashedValue(), input.data);
+		state.resolveData.get(input.domain.getRootHashedvalue(), locals.subdomainHashMap);
+		locals.subdomainHashMap.set(input.domain.getFullHashedValue(), input.data);
+		state.resolveData.set(input.domain.getRootHashedvalue(), locals.subdomainHashMap);
 		output.result = SUCCESS;
 	}
-	
+
+	struct RegisterDomain_input {
+		Domain domain;
+		uint16 registrationYears;
+	};
+	struct RegisterDomain_output {
+		uint8 result;
+	};
 	struct RegisterDomain_locals {
 		QNSLogger logger;
 		RegistryRecord record;
 		uint32 date;
-		//SubdomainResolveHashMap subdomainHashMap;
+		HashMap<uint64, ResolveData, MAX_NUMBER_OF_SUBDOMAINS> subdomainHashMap;
+		uint16 registerEpoch;
 	};
-
 	PUBLIC_PROCEDURE_WITH_LOCALS(RegisterDomain) {
 		if (!input.domain.validate()) {
 			output.result = Error::NAME_INVALID;
+			qpi.transfer(qpi.invocator(), qpi.invocationReward());
 			return;
 		}
 
 		if (state.registry.get(input.domain.getRootHashedvalue(), locals.record)) {
 			output.result = Error::NAME_ALREADY_REGISTERED;
+			qpi.transfer(qpi.invocator(), qpi.invocationReward());
 			return;
 		}
 
-		if (input.endEpoch % EPOCHS_IN_YEAR != 0 || input.endEpoch < qpi.epoch() + EPOCHS_IN_YEAR) {
-			output.result = Error::DATE_INVALID;
+		// Check if tld is supported
+		bool tldSupported = false;
+		for (uint64 i = 0; i < state.TLDs.capacity(); i++) {
+			if (input.domain.tld == state.TLDs.get(i)) {
+				tldSupported = true;
+				break;
+			}
+		}
+		if (!tldSupported) {
+			output.result = Error::TLD_INVALID;
+			qpi.transfer(qpi.invocator(), qpi.invocationReward());
+			return;
+		}
+
+		if (qpi.invocationReward() < input.registrationYears * REGISTER_FEE_PER_YEAR) {
+			output.result = Error::INVALID_FUND;
+			qpi.transfer(qpi.invocator(), qpi.invocationReward());
 			return;
 		}
 		
@@ -339,30 +403,53 @@ public:
 		output.result = SUCCESS;
 		locals.logger = { FEIYU_CONTRACT_INDEX, SUCCESS, 0 };
 		LOG_INFO(locals.logger);
-		state.registry.set(input.domain.getRootHashedvalue(), { qpi.invocator(), qpi.epoch(), input.endEpoch, locals.date });
-		//state.resolveData.set(input.domain.getRootHashedvalue(), locals.subdomainHashMap);
+		state.registry.set(input.domain.getRootHashedvalue(), { qpi.invocator(), qpi.epoch(), input.registrationYears });
+		state.resolveData.set(input.domain.getRootHashedvalue(), locals.subdomainHashMap);
+
 	}
-	
+
+	struct INITIALIZE_locals {
+		uint64 i;
+	};
+	INITIALIZE_WITH_LOCALS() {
+		state.QUBIC_TLD = UEFIString<MAX_TLD_LENGTH>();
+		state.QNS_TLD = UEFIString<MAX_TLD_LENGTH>();
+
+		state.QUBIC_TLD.set(0, 113); // 'q'
+		state.QUBIC_TLD.set(1, 117); // 'u'
+		state.QUBIC_TLD.set(2, 98); // 'b'
+		state.QUBIC_TLD.set(3, 105); // 'i'
+		state.QUBIC_TLD.set(4, 99); // 'c'
+		state.QUBIC_TLD.set(5, 0); // null terminator
+
+		state.QNS_TLD.set(0, 113); // 'q'
+		state.QNS_TLD.set(1, 110); // 'n'
+		state.QNS_TLD.set(2, 115); // 's'
+		state.QNS_TLD.set(3, 0); // null terminator
+
+		state.TLDs.set(0, state.QUBIC_TLD);
+		state.TLDs.set(1, state.QNS_TLD);
+	}
+
 	struct BEGIN_EPOCH_locals {
 		uint64 i;
 		uint64 key;
 		RegistryRecord record;
 		uint32 newEpoch;
 	};
-
 	BEGIN_EPOCH_WITH_LOCALS() {
 		locals.newEpoch = qpi.epoch();
 		for (locals.i = 0; locals.i < state.registry.capacity(); locals.i++) {
 			locals.key = state.registry.key(locals.i);
 			locals.record = state.registry.value(locals.i);
 
-			if (locals.record.endEpoch < locals.newEpoch) {
+			if (static_cast<uint32>(locals.record.registerEpoch) + static_cast<uint32>(locals.record.registrationYears * EPOCHS_IN_YEAR) < locals.newEpoch) {
 				state.registry.removeByKey(locals.key);
+				state.resolveData.removeByKey(locals.key);
 			}
 		}
 	}
 
-	
 	REGISTER_USER_FUNCTIONS_AND_PROCEDURES()
 	{
 		REGISTER_USER_FUNCTION(GetDomainRegistry, 10);
@@ -371,5 +458,7 @@ public:
 		REGISTER_USER_PROCEDURE(RegisterDomain, 8);
 		REGISTER_USER_PROCEDURE(SetResolveData, 9);
 		REGISTER_USER_PROCEDURE(TransferDomain, 11);
+		REGISTER_USER_PROCEDURE(UpdateSubdomainMap, 12);
+		REGISTER_USER_PROCEDURE(RenewDomain, 13);
 	}
 };
