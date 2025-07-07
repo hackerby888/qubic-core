@@ -37,7 +37,7 @@
     <ClInclude Include="contracts\Qearn.h" />
     <ClInclude Include="contracts\QVAULT.h" />
     <ClInclude Include="contracts\QBAY.h" />
-    <ClInclude Include="contracts\Feiyu.h" />
+    <ClInclude Include="contracts\Qns.h" />
     <ClInclude Include="contracts\TestExampleA.h" />
     <ClInclude Include="contracts\TestExampleB.h" />
     <ClInclude Include="contracts\TestExampleC.h" />
