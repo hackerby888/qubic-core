@@ -9,8 +9,14 @@ using namespace std;
 static const id user(1, 2, 3, 4);
 static const id user2(1, 2, 3, 3);
 static const id FEIYU_CONTRACT_ID(FEIYU_CONTRACT_INDEX, 0, 0, 0);
+constexpr sint64 BASE_MONEY = 1'000'000'000;
 
-typedef HashMap<uint64, ResolveData, MAX_NUMBER_OF_SUBDOMAINS> SubdomainMap;
+template <uint64 LENGTH = MAX_NAME_LENGTH>
+using UEFIString = FEIYU::UEFIString<LENGTH>;
+using ResolveData = FEIYU::ResolveData;
+using Domain = FEIYU::Domain;
+using RegistryRecord = FEIYU::RegistryRecord;
+using SubdomainMap = HashMap<uint64, ResolveData, MAX_NUMBER_OF_SUBDOMAINS>;
 
 template <uint64 LENGTH = MAX_NAME_LENGTH>
 class UEFIString2 : public UEFIString<LENGTH> {
@@ -48,206 +54,242 @@ public:
 	}
 };
 
-class FeiyuChecker : FEIYU {
-public:
-	void removeDomainResolveData(Domain domain, bool isDeleteAll, SubdomainMap& gmap) {
-		if (isDeleteAll) {
-			resolveData.removeByKey(domain.getRootHashedvalue());
-		}
-		else {
-			SubdomainMap map;
-			resolveData.get(domain.getRootHashedvalue(), map);
-			map.removeByKey(domain.getFullHashedValue());
-			gmap = map;
-		}
-	}
-};
-
 class FeiyuTest : public ContractTesting {
+private:
+	id __caller;
 public:
+	void setCaller(id caller) {
+		__caller = caller;
+	}
+
+	id getCaller() {
+		return __caller;
+	}
+
 	FeiyuTest() {
 		initEmptySpectrum();
 		initEmptyUniverse();
 		INIT_CONTRACT(FEIYU);
+
+		callSystemProcedure(FEIYU_CONTRACT_INDEX, INITIALIZE);
 	}
 
-	void removeDomainResolveData(Domain domain, bool isDeleteAll) {
-		increaseEnergy(user, 1);
-		SubdomainMap map;
-		getState()->removeDomainResolveData(domain, isDeleteAll, map);
-		FEIYU::UpdateSubdomainMap_input input;
-		input.domain = domain;
-		input.subdomainHashMap = map;
-		FEIYU::UpdateSubdomainMap_output output;
-		invokeUserProcedure(FEIYU_CONTRACT_INDEX, 12, input, output, user, 0);
-		EXPECT_EQ(output.result, SUCCESS);
-	}
-
-	void testInsertDomain(Domain domain, sint8 expectedOutputCode = 0) {
-		increaseEnergy(user, 1);
-
+	FEIYU::RegisterDomain_output registerDomain(Domain domain, uint16 registrationYears, sint64 fee) {
 		FEIYU::RegisterDomain_input input;
 		input.domain = domain;
-		input.registrationYears = 1;
+		input.registrationYears = registrationYears;
 		FEIYU::RegisterDomain_output output;
-		invokeUserProcedure(FEIYU_CONTRACT_INDEX, 8, input, output, user, 0);
+		EXPECT_TRUE(invokeUserProcedure(FEIYU_CONTRACT_INDEX, 8, input, output, getCaller(), fee));
 
-		EXPECT_EQ(output.result, expectedOutputCode);
+		return output;
 	}
 
-	void testGetDomainResolveData(Domain domain, ResolveData expectedResolveData, uint8 expectedOutputCode) {
-		increaseEnergy(user, 1);
-		FEIYU::GetResolveData_input input;
+	FEIYU::GetResolveTextData_output getDomainResolveTextData(Domain domain) {
+		FEIYU::GetResolveTextData_input input;
 		input.domain = domain;
-		FEIYU::GetResolveData_output output;
+		FEIYU::GetResolveTextData_output output;
+		callFunction(FEIYU_CONTRACT_INDEX, 13, input, output);
 
+		return output;
+	}
+
+	FEIYU::GetResolveAddressData_output getDomainResolveAddressData(Domain domain) {
+		FEIYU::GetResolveAddressData_input input;
+		input.domain = domain;
+		FEIYU::GetResolveAddressData_output output;
 		callFunction(FEIYU_CONTRACT_INDEX, 12, input, output);
-		EXPECT_EQ(output.result, expectedOutputCode);
-		if (output.result == SUCCESS) {
-			EXPECT_EQ(output.data, expectedResolveData);
-		}
+
+		return output;
 	}
 
-	void testSetResolveData(Domain domain, ResolveData resolveData, uint8 expectedOutputCode) {
-		increaseEnergy(user, 1);
-		FEIYU::SetResolveData_input input;
-		input.data = resolveData;
+	FEIYU::SetResolveAddressData_output setResolveAddressData(Domain domain, id address) {
+		FEIYU::SetResolveAddressData_input input;
+		input.address = address;
 		input.domain = domain;
-		FEIYU::SetResolveData_output output;
+		FEIYU::SetResolveAddressData_output output;
+		EXPECT_TRUE(invokeUserProcedure(FEIYU_CONTRACT_INDEX, 9, input, output, getCaller(), 0));
 
-		invokeUserProcedure(FEIYU_CONTRACT_INDEX, 9, input, output, user, 0);
-		EXPECT_EQ(output.result, expectedOutputCode);
+		return output;
 	}
 
-	void testGetDomainRegistry(Domain domain, RegistryRecord record, uint8 expectedOutputCode) {
-		increaseEnergy(user, 1);
-		FEIYU::GetDomainRegistry_input input;
+	FEIYU::SetResolveTextData_output setResolveTextData(Domain domain, UEFIString<> text) {
+		FEIYU::SetResolveTextData_input input;
+		input.text = text;
 		input.domain = domain;
-		FEIYU::GetDomainRegistry_output output;
+		FEIYU::SetResolveTextData_output output;
+		EXPECT_TRUE(invokeUserProcedure(FEIYU_CONTRACT_INDEX, 10, input, output, getCaller(), 0));
+
+		return output;
+	}
+
+	FEIYU::GetDomainRegistryRecord_output GetDomainRegistryRecord(Domain domain) {
+		FEIYU::GetDomainRegistryRecord_input input;
+		input.domain = domain;
+		FEIYU::GetDomainRegistryRecord_output output;
 		callFunction(FEIYU_CONTRACT_INDEX, 10, input, output);
-		if (output.result == 0) {
-			EXPECT_EQ(output.record.owner, record.owner);
-			cout << output.record.registerEpoch << endl;
-		}
+
+		return output;
 	}
 
-	void testTransferToNewOwner(Domain domain, id newOwner) {
-		increaseEnergy(user, 1);
+	FEIYU::TransferDomain_output transferDomain(Domain domain, id newOwner, sint64 fee) {
 		FEIYU::TransferDomain_input input;
 		input.domain = domain;
 		input.newOwner = newOwner;
 		FEIYU::TransferDomain_output output;
-		invokeUserProcedure(FEIYU_CONTRACT_INDEX, 11, input, output, user, 0);
-		EXPECT_EQ(output.result, 0);
+		EXPECT_TRUE(invokeUserProcedure(FEIYU_CONTRACT_INDEX, 11, input, output, getCaller(), fee));
+		return output;
 	}
 
-	FeiyuChecker* getState()
-	{
-		return (FeiyuChecker*)contractStates[FEIYU_CONTRACT_INDEX];
+	FEIYU::RenewDomain_output renewDomain(Domain domain, uint16 yearsToRenew, sint64 fee) {
+		FEIYU::RenewDomain_input input;
+		input.domain = domain;
+		input.yearsToRenew = yearsToRenew;
+		FEIYU::RenewDomain_output output;
+		EXPECT_TRUE(invokeUserProcedure(FEIYU_CONTRACT_INDEX, 13, input, output, getCaller(), fee));
+		return output;
+	}
+
+	void endEpoch() {
+		callSystemProcedure(FEIYU_CONTRACT_INDEX, BEGIN_EPOCH);
 	}
 };
 
-//TEST(Aleo, TestSysCall) {
-//	string text("pro player");
-//	uefiString uefiText;
-//	UEFIStringHelper::initEmptyUEFIString(uefiText);
-//	UEFIStringHelper::cStringToUEFIString(text, uefiText);
-//
-//	string text2;
-//	UEFIStringHelper::UEFIStringToCString(uefiText, text2);
-//
-//	cout << text2 << endl;
-//
-//	FeiyuTest test;
-//	test.testSyscall();
-//}
-
-//TEST(Aleo, TestStateNumber) {
-//	FeiyuTest test;
-//	test.testStateNumber();
-//}
-//
-//TEST(Aleo, TestMoveMoney) {
-//	FeiyuTest test;
-//	test.testMoveMoney();
-//}
-//
-//TEST(Aleo, TestReturnBackMoney) {
-//	FeiyuTest test;
-//	test.testReturnBack();
-//}
-//
-//TEST(Aleo, TestString) {
-//	FeiyuTest test;
-//	test.testString();
-//}
-
-//TEST(Aleo, StringValidate) {
-//	string text("a");
-//	uefiString uefiText;
-//	UEFIStringHelper::initEmptyUEFIString(uefiText);
-//	UEFIStringHelper::cStringToUEFIString(text, uefiText);
-//
-//	EXPECT_EQ(QNSHelper::validateName(uefiText), true);
-//}
-
-TEST(Aleo, TestAddDomain) {
-	HashMap<uint64, uint64, 1> testMap;
-	testMap.set(1, 2);
-	testMap.set(2, 3);
-	testMap.isEmptySlot(0); // should return true
-	uint64 value;
-	testMap.get(1, value);
-	cout << "1" << value << endl;
-	testMap.get(2, value);
-	cout << "2" << value << endl;
-	cout << "total bytes contract" << sizeof(HashMap<uint64, RegistryRecord, MAX_NUMBER_OF_DOMAINS>) + (sizeof(HashMap<uint64, SubdomainMap, MAX_NUMBER_OF_DOMAINS>)) << endl;
+TEST(QNS, RegisterDomain) {
+	system.epoch = 77;
+	utcTime.Second = 7;
+	utcTime.Minute = 7;
+	utcTime.Hour = 7;
+	utcTime.Day = 7;
+	utcTime.Month = 7;
+	utcTime.Year = 2025;
+	//updateTime();
+	updateQpiTime();
+	uint16 yearsToRegister = 1;
 	FeiyuTest test;
-	Domain domain(UEFIString2<>::getEmpty(), UEFIString2<>::fromCString("example"), UEFIString2<MAX_TLD_LENGTH>::fromCString("com"));
-	Domain domain2(UEFIString2<>::getEmpty(), UEFIString2<>::fromCString("example2"), UEFIString2<MAX_TLD_LENGTH>::fromCString("com"));
-	Domain domain3(UEFIString2<>::getEmpty(), UEFIString2<>::fromCString("example"), UEFIString2<MAX_TLD_LENGTH>::fromCString("org"));
+	test.setCaller(user);
+	Domain domainValid(UEFIString2<>::getEmpty(), UEFIString2<>::fromCString("example"), UEFIString2<MAX_TLD_LENGTH>::fromCString("qns"));
+	Domain domainTldInvalid(UEFIString2<>::getEmpty(), UEFIString2<>::fromCString("example"), UEFIString2<MAX_TLD_LENGTH>::fromCString("com"));
+	Domain domainRootEmpty(UEFIString2<>::getEmpty(), UEFIString2<>::fromCString(""), UEFIString2<MAX_TLD_LENGTH>::fromCString("qns"));
 
-	test.testInsertDomain(domain, SUCCESS);
-	test.testInsertDomain(domain, Error::NAME_ALREADY_REGISTERED);
+	increaseEnergy(user, BASE_MONEY);
+	FEIYU::RegisterDomain_output output;
+	output = test.registerDomain(domainValid, yearsToRegister, 1);
+	EXPECT_EQ(output.result, Error::INVALID_FUND);
+	output = test.registerDomain(domainValid, yearsToRegister, yearsToRegister * REGISTER_FEE_PER_YEAR);
+	EXPECT_EQ(getBalance(user), BASE_MONEY - yearsToRegister * REGISTER_FEE_PER_YEAR);
+	output = test.registerDomain(domainTldInvalid, yearsToRegister, yearsToRegister * REGISTER_FEE_PER_YEAR);
+	EXPECT_EQ(output.result, Error::INVALID_TLD);
+	output = test.registerDomain(domainRootEmpty, yearsToRegister, yearsToRegister * REGISTER_FEE_PER_YEAR);
+	EXPECT_EQ(output.result, Error::INVALID_NAME);
+	// After 2 fails to register, user should still have the same balance
+	EXPECT_EQ(getBalance(user), BASE_MONEY - yearsToRegister * REGISTER_FEE_PER_YEAR);
 
-	// test get resolve data
+	FEIYU::GetDomainRegistryRecord_output getDomainRegistryOutput;
+	getDomainRegistryOutput = test.GetDomainRegistryRecord(domainValid);
+	EXPECT_EQ(getDomainRegistryOutput.result, QNS_SUCCESS_CODE);
+	EXPECT_EQ(getDomainRegistryOutput.record.owner, user);
+	EXPECT_TRUE(getDomainRegistryOutput.record.registerEpoch == system.epoch ? 1 : 0);
+	EXPECT_TRUE(getDomainRegistryOutput.record.registrationYears == yearsToRegister ? 1 : 0);
+	uint32 date;
+	QUOTTERY::packQuotteryDate(utcTime.Year-2000, utcTime.Month, utcTime.Day, utcTime.Hour, utcTime.Minute, utcTime.Second, date);
+	EXPECT_TRUE(getDomainRegistryOutput.record.registerDate == date ? 1 : 0);
+	getDomainRegistryOutput = test.GetDomainRegistryRecord(domainTldInvalid);
+	EXPECT_EQ(getDomainRegistryOutput.result, Error::NAME_NOT_REGISTERED);
+}
+
+TEST(QNS, SetAndGetResolveData) {
+	uint16 yearsToRegister = 1;
+	FeiyuTest test;
+	test.setCaller(user);
+	Domain domainValid(UEFIString2<>::getEmpty(), UEFIString2<>::fromCString("example"), UEFIString2<MAX_TLD_LENGTH>::fromCString("qns"));
+	increaseEnergy(user, BASE_MONEY);
+	FEIYU::RegisterDomain_output output;
+	output = test.registerDomain(domainValid, yearsToRegister, yearsToRegister * REGISTER_FEE_PER_YEAR);
+	EXPECT_EQ(output.result, QNS_SUCCESS_CODE);
+
 	ResolveData resolveData;
-	ResolveData resolveData2;
-	test.testSetResolveData(domain, resolveData, SUCCESS);
-	// example2.com is not registered, so it should return error
-	test.testSetResolveData(domain2, resolveData, Error::NAME_NOT_REGISTERED);
-	test.testSetResolveData(domain3, resolveData, Error::NAME_NOT_REGISTERED);
-	//test.removeDomainResolveData(domain, false);
-	test.testGetDomainResolveData(domain, resolveData, SUCCESS);
-	test.testGetDomainResolveData(domain2, resolveData, Error::NAME_NOT_REGISTERED);
+	resolveData.address = user2;
+	resolveData.text = UEFIString2<>::fromCString("text data");
+	test.setResolveAddressData(domainValid, resolveData.address);
+	test.setResolveTextData(domainValid, resolveData.text);
 
-	// should get error because example.com is not registered (delete)
-	test.removeDomainResolveData(domain, false);
-	test.testGetDomainResolveData(domain, resolveData, Error::NAME_HAS_NO_RESOLVE_DATA);
+	FEIYU::GetResolveTextData_output getResolveTextDataOutput;
+	getResolveTextDataOutput = test.getDomainResolveTextData(domainValid);
+	EXPECT_EQ(getResolveTextDataOutput.result, QNS_SUCCESS_CODE);
+	EXPECT_EQ(getResolveTextDataOutput.text, resolveData.text);
 
-	domain.setSubDomain(UEFIString2<>::fromCString("ok"));
-	// only example.com should have resolve data not ok.example.com, so this should return error
-	test.testGetDomainResolveData(domain, resolveData, Error::NAME_HAS_NO_RESOLVE_DATA);
+	FEIYU::GetResolveAddressData_output getResolveAddressDataOutput;
+	getResolveAddressDataOutput = test.getDomainResolveAddressData(domainValid);
+	EXPECT_EQ(getResolveAddressDataOutput.result, QNS_SUCCESS_CODE);
+	EXPECT_EQ(getResolveAddressDataOutput.address, resolveData.address);
 
-	RegistryRecord record;
-	record.owner = user;
-	test.testGetDomainRegistry(domain, record, SUCCESS);
-	domain.setSubDomain(UEFIString2<>::fromCString("ok"));
-	test.testGetDomainRegistry(domain, record, SUCCESS);
+	// Test for invalid domain
+	Domain domainInvalid(UEFIString2<>::getEmpty(), UEFIString2<>::fromCString("invalid"), UEFIString2<MAX_TLD_LENGTH>::fromCString("qns"));
+	FEIYU::GetResolveTextData_output getResolveTextDataInvalidOutput;
+	getResolveTextDataInvalidOutput = test.getDomainResolveTextData(domainInvalid);
+	EXPECT_EQ(getResolveTextDataInvalidOutput.result, Error::NAME_NOT_REGISTERED);
+	FEIYU::GetResolveAddressData_output getResolveAddressDataInvalidOutput;
+	getResolveAddressDataInvalidOutput = test.getDomainResolveAddressData(domainInvalid);
+	EXPECT_EQ(getResolveAddressDataInvalidOutput.result, Error::NAME_NOT_REGISTERED);
 
-	// test transfer domain
-	test.testTransferToNewOwner(domain, user2);
-	record.owner = user2;
-	test.testGetDomainRegistry(domain, record, SUCCESS);
-	//SubdomainMap subMap;
-	//uint64 key = subMap.key(0);
-	//ResolveData data = subMap.value(0);
-	//ResolveData empty;
-	//EXPECT_EQ(empty, data);
-	//cout << "test key" << key << endl;
+}
 
-	//uint32 res;
-	//QUOTTERY::packQuotteryDate(25, 6, 30, 0, 0, 0, res);
-	//cout << "test get day" << QUOTTERY::qtryGetDay(res) << endl;
-	//cout << "test datae" << res << endl;
+TEST(QNS, TransferAndRenewDomain) {
+	uint16 yearsToRegister = 1;
+	FeiyuTest test;
+	test.setCaller(user);
+	Domain domainValid(UEFIString2<>::getEmpty(), UEFIString2<>::fromCString("example"), UEFIString2<MAX_TLD_LENGTH>::fromCString("qns"));
+	increaseEnergy(user, BASE_MONEY);
+	increaseEnergy(user2, BASE_MONEY);
+	FEIYU::RegisterDomain_output output;
+	output = test.registerDomain(domainValid, yearsToRegister, yearsToRegister * REGISTER_FEE_PER_YEAR);
+	EXPECT_EQ(output.result, QNS_SUCCESS_CODE);
+	FEIYU::TransferDomain_output transferOutput;
+	test.setCaller(user2);
+	transferOutput = test.transferDomain(domainValid, user2, TRANSFER_DOMAIN_FEE);
+	EXPECT_EQ(transferOutput.result, Error::NOT_THE_OWNER);
+	test.setCaller(user);
+	transferOutput = test.transferDomain(domainValid, user2, 1);
+	EXPECT_EQ(transferOutput.result, Error::INVALID_FUND);
+	test.setCaller(user);
+	transferOutput = test.transferDomain(domainValid, user2, TRANSFER_DOMAIN_FEE);
+	EXPECT_EQ(transferOutput.result, QNS_SUCCESS_CODE);
+	FEIYU::GetDomainRegistryRecord_output getDomainRegistryOutput;
+	getDomainRegistryOutput = test.GetDomainRegistryRecord(domainValid);
+	EXPECT_EQ(getDomainRegistryOutput.result, QNS_SUCCESS_CODE);
+	EXPECT_EQ(getDomainRegistryOutput.record.owner, user2);
+
+	// Test renew domain
+	FEIYU::RenewDomain_output renewOutput;
+	test.setCaller(user);
+	renewOutput = test.renewDomain(domainValid, 1, 1);
+	EXPECT_EQ(renewOutput.result, Error::NOT_THE_OWNER);
+	test.setCaller(user2);
+	renewOutput = test.renewDomain(domainValid, 1, 1);
+	EXPECT_EQ(renewOutput.result, Error::INVALID_FUND);
+	test.setCaller(user2);
+	renewOutput = test.renewDomain(domainValid, 1, REGISTER_FEE_PER_YEAR);
+	EXPECT_EQ(renewOutput.result, QNS_SUCCESS_CODE);
+	getDomainRegistryOutput = test.GetDomainRegistryRecord(domainValid);
+	EXPECT_EQ(getDomainRegistryOutput.result, QNS_SUCCESS_CODE);
+	EXPECT_TRUE(getDomainRegistryOutput.record.registrationYears == yearsToRegister + 1 ? 1 : 0);
+}
+
+TEST(QNS, DomainExpried) {
+	system.epoch = 100;
+	uint16 yearsToRegister = 1;
+	FeiyuTest test;
+	test.setCaller(user);
+	Domain domainValid(UEFIString2<>::getEmpty(), UEFIString2<>::fromCString("example"), UEFIString2<MAX_TLD_LENGTH>::fromCString("qns"));
+	increaseEnergy(user, BASE_MONEY);
+	increaseEnergy(user2, BASE_MONEY);
+	FEIYU::RegisterDomain_output output;
+	output = test.registerDomain(domainValid, yearsToRegister, yearsToRegister * REGISTER_FEE_PER_YEAR);
+	EXPECT_EQ(output.result, QNS_SUCCESS_CODE);
+
+	system.epoch = 100 + EPOCHS_IN_YEAR * yearsToRegister + 1; // make sure the domain is expried
+	test.endEpoch(); // call end epoch to clean up expired domains
+	FEIYU::GetDomainRegistryRecord_output getDomainRegistryOutput;
+	getDomainRegistryOutput = test.GetDomainRegistryRecord(domainValid);
+	EXPECT_EQ(getDomainRegistryOutput.result, Error::NAME_NOT_REGISTERED);
 }
