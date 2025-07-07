@@ -108,8 +108,8 @@
     <ClInclude Include="contracts\Qx.h">
       <Filter>contracts</Filter>
     </ClInclude>
-	<ClInclude Include="contracts\Feiyu.h">
-       <Filter>contracts</Filter>
+    <ClInclude Include="contracts\Qns.h">
+      <Filter>contracts</Filter>
     </ClInclude>
     <ClInclude Include="contracts\Random.h">
       <Filter>contracts</Filter>

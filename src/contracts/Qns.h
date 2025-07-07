@@ -1,7 +1,7 @@
 using namespace QPI;
 
 static constexpr uint8 QNS_SUCCESS_CODE = 0;
-static constexpr uint64 MAX_NUMBER_OF_DOMAINS = 1'048'576;
+static constexpr uint64 MAX_NUMBER_OF_DOMAINS = 524'288;
 static constexpr uint64 MAX_NUMBER_OF_SUBDOMAINS = 16;
 static constexpr uint8 EPOCHS_IN_YEAR = 52; 
 static constexpr uint8 MAX_NAME_LENGTH = 32;
@@ -30,10 +30,10 @@ enum Error {
 	INVALID_FUND
 };
 
-struct FEIYU2
+struct QNS2
 {
 };
-struct FEIYU : public ContractBase
+struct QNS : public ContractBase
 {
 public:
 	////// ******** Data Structures ******** //////
@@ -56,7 +56,7 @@ public:
 				return false;
 			}
 
-			uint8 nullTerminatorIndex = 0;
+			uint64 nullTerminatorIndex = 0;
 			for (uint64 i = 0; i < this->capacity(); i++) {
 				if (this->get(i) == 0) {
 					nullTerminatorIndex = i;
@@ -110,7 +110,7 @@ public:
 		UEFIString<> rootDomain;
 		UEFIString<MAX_TLD_LENGTH> tld;
 
-		static HashFunction<UEFIString<>> hasher;
+		static HashFunction<UEFIString<>> nameHasher;
 		static HashFunction< UEFIString<MAX_TLD_LENGTH>> tldHasher;
 		static HashFunction<uint64> uint64Hasher;
 
@@ -142,12 +142,12 @@ public:
 
 		// If domain is sub.example.com then will return the hash of sub.example.com
 		uint64 getFullHashedValue() const {
-			return uint64Hasher.hash(hasher.hash(subDomain) + hasher.hash(rootDomain) + tldHasher.hash(tld));
+			return uint64Hasher.hash(nameHasher.hash(subDomain) + nameHasher.hash(rootDomain) + tldHasher.hash(tld));
 		}
 
 		// If domain is sub.example.com then will return the hash of example.com
 		uint64 getRootHashedvalue() const {
-			return uint64Hasher.hash(hasher.hash(rootDomain) + tldHasher.hash(tld));
+			return uint64Hasher.hash(nameHasher.hash(rootDomain) + tldHasher.hash(tld));
 		}
 	};
 
@@ -255,7 +255,7 @@ public:
 
 		QUOTTERY::getCurrentDate(qpi, locals.date);
 		output.result = QNS_SUCCESS_CODE;
-		locals.logger = { FEIYU_CONTRACT_INDEX, QNS_SUCCESS_CODE, 0 };
+		locals.logger = { SELF_INDEX, QNS_SUCCESS_CODE, 0 };
 		LOG_INFO(locals.logger);
 		locals.record.owner = qpi.invocator();
 		locals.record.registerDate = locals.date;
@@ -264,18 +264,6 @@ public:
 		state.registry.set(input.domain.getRootHashedvalue(), locals.record);
 		state.resolveData.set(input.domain.getRootHashedvalue(), locals.subdomainHashMap);
 	}
-
-	//struct UpdateSubdomainMap_input {
-	//	Domain domain;
-	//	HashMap<uint64, ResolveData, MAX_NUMBER_OF_SUBDOMAINS> subdomainHashMap;
-	//};
-	//struct UpdateSubdomainMap_output {
-	//	uint8 result;
-	//};
-	//PUBLIC_PROCEDURE(UpdateSubdomainMap) {
-	//	state.resolveData.set(input.domain.getRootHashedvalue(), input.subdomainHashMap);
-	//	output.result = QNS_SUCCESS_CODE;
-	//}
 
 	struct RenewDomain_input {
 		Domain domain;
@@ -307,7 +295,7 @@ public:
 			return;
 		}
 
-		locals.logger = { FEIYU_CONTRACT_INDEX, QNS_SUCCESS_CODE, 0 };
+		locals.logger = { SELF_INDEX, QNS_SUCCESS_CODE, 0 };
 		LOG_INFO(locals.logger);
 		locals.record.registrationYears += input.yearsToRenew;
 		state.registry.set(input.domain.getRootHashedvalue(), locals.record);
@@ -409,7 +397,7 @@ public:
 			return;
 		}
 
-		locals.logger = { FEIYU_CONTRACT_INDEX, QNS_SUCCESS_CODE, 0 };
+		locals.logger = { SELF_INDEX, QNS_SUCCESS_CODE, 0 };
 		LOG_INFO(locals.logger);
 		// Set the new owner in the registry record
 		locals.record.owner = input.newOwner;
@@ -464,7 +452,7 @@ public:
 			return;
 		}
 
-		locals.logger = { FEIYU_CONTRACT_INDEX, QNS_SUCCESS_CODE, 0 };
+		locals.logger = { SELF_INDEX, QNS_SUCCESS_CODE, 0 };
 		LOG_INFO(locals.logger);
 		// Get the subdomain hashmap out first
 		state.resolveData.get(input.domain.getRootHashedvalue(), locals.subdomainHashMap);
@@ -503,7 +491,7 @@ public:
 			output.result = Error::NOT_THE_OWNER;
 			return;
 		}
-		locals.logger = { FEIYU_CONTRACT_INDEX, QNS_SUCCESS_CODE, 0 };
+		locals.logger = { SELF_INDEX, QNS_SUCCESS_CODE, 0 };
 		LOG_INFO(locals.logger);
 		// Get the subdomain hashmap out first
 		state.resolveData.get(input.domain.getRootHashedvalue(), locals.subdomainHashMap);
@@ -574,7 +562,6 @@ public:
 		REGISTER_USER_PROCEDURE(SetResolveAddressData, 9);
 		REGISTER_USER_PROCEDURE(SetResolveTextData, 10);
 		REGISTER_USER_PROCEDURE(TransferDomain, 11);
-		//REGISTER_USER_PROCEDURE(UpdateSubdomainMap, 12);
 		REGISTER_USER_PROCEDURE(RenewDomain, 13);
 	}
 };

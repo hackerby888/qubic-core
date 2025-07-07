@@ -119,7 +119,7 @@
     <ClInclude Include="test_util.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="contract_feiyu.cpp" />
+    <ClCompile Include="contract_qns.cpp" />
     <ClCompile Include="common_def.cpp" />
     <ClCompile Include="file_io.cpp" />
     <ClCompile Include="qpi_collection.cpp" />
